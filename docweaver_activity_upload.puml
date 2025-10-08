@@ -1,0 +1,35 @@
+@startuml
+' Use Case: Upload Document (Operator → System)
+
+skinparam backgroundColor #FFFFFF
+skinparam activity {
+  BackgroundColor<<user>> #E8F5E9
+  BackgroundColor<<system>> #E3F2FD
+  BorderColor #555555
+}
+skinparam shadowing false
+skinparam arrowColor #555555
+skinparam roundcorner 12
+title DocWeaver — Activity (Upload Document)
+
+start
+partition "Operator" {
+  :Select PDF(s)/image(s) from device; <<user>>;
+  :Click Upload; <<user>>;
+}
+
+partition "System" {
+  :Validate type, size, malware scan; <<system>>;
+  if ("Valid?") then (yes)
+    :Store originals to secure object storage; <<system>>;
+    :Create Document + ProcessingJob; <<system>>;
+    :Set status = "Processing"; <<system>>;
+    :Emit AuditEvent(uploaded); <<system>>;
+    :Show status chip on list; <<system>>;
+  else (no)
+    :Return validation error(s) to Operator; <<system>>;
+  endif
+}
+
+stop
+@enduml

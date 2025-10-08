@@ -1,0 +1,33 @@
+@startuml
+' Use Case: Extract Key Fields (System automation)
+' Actor in your OOA: Extraction Module (system)
+
+skinparam backgroundColor #FFFFFF
+skinparam activity {
+  BackgroundColor<<system>> #E3F2FD
+  BorderColor #555555
+}
+skinparam shadowing false
+skinparam arrowColor #555555
+skinparam roundcorner 12
+title DocWeaver — Activity (Extract Key Fields)
+
+start
+partition "System (Extraction Module)" {
+  :Fetch next ProcessingJob; <<system>>;
+  :Classify document (invoice / receipt / PO / contract); <<system>>;
+  :Apply extraction models; <<system>>;
+  :Produce draft Record (fields, line items, confidence); <<system>>;
+  :Anchor fields to source regions; <<system>>;
+  if ("Any low-confidence or missing fields?") then (yes)
+    :Mark fields for review; <<system>>;
+    :Set record state = "Needs Review"; <<system>>;
+  else (no)
+    :Set record state = "Auto-Approved Candidate"; <<system>>;
+  endif
+  :Persist Record and associations; <<system>>;
+  :Emit AuditEvent(extracted, modelVersion, metrics); <<system>>;
+  :Update search index (vendor, dates, totals, status); <<system>>;
+}
+stop
+@enduml

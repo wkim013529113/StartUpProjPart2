@@ -1,0 +1,63 @@
+@startuml
+' Use Case: Approve Export (Reviewer → System → (optional) Integration)
+
+skinparam backgroundColor #FFFFFF
+skinparam activity {
+  BackgroundColor<<reviewer>> #FFF8E1
+  BackgroundColor<<system>> #E3F2FD
+  BackgroundColor<<integration>> #F3E5F5
+  BorderColor #555555
+}
+skinparam shadowing false
+skinparam arrowColor #555555
+skinparam roundcorner 12
+title DocWeaver — Activity (Approve Export)
+
+start
+partition "Reviewer" {
+  :Open document split view (source ↔ extracted fields); <<reviewer>>;
+  repeat
+    :Review highlighted low-confidence fields; <<reviewer>>;
+    if ("Correction needed?") then (yes)
+      :Edit value / map key / fix line items; <<reviewer>>;
+      partition "System" {
+        :Recompute totals & validations; <<system>>;
+      }
+    else (no)
+      ' continue
+    endif
+  repeat while ("More flagged fields?")
+  :Approve record; <<reviewer>>;
+}
+
+partition "System" {
+  :Lock record; <<system>>;
+  :Set status = "Ready for Export"; <<system>>;
+  :Emit AuditEvent(approved); <<system>>;
+}
+
+partition "Reviewer" {
+  :Choose export target (Spreadsheet or Accounting/ERP); <<reviewer>>;
+}
+
+partition "System" {
+  if ("Target = Spreadsheet?") then (yes)
+    :Generate CSV/XLSX; <<system>>;
+    :Provide secure download link; <<system>>;
+    :Emit AuditEvent(export_generated); <<system>>;
+  else (no)
+    partition "Integration" {
+      :Map fields → target schema (e.g., QuickBooks); <<integration>>;
+      if ("Post succeeded?") then (yes)
+        :Store external ID; <<integration>>;
+        :Mark record = "Exported"; <<integration>>;
+        :Emit AuditEvent(exported, externalId); <<integration>>;
+      else (no)
+        :Set status = "Export Failed"; <<integration>>;
+        :Emit AuditEvent(export_failed, reason); <<integration>>;
+      endif
+    }
+  endif
+}
+stop
+@enduml
