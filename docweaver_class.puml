@@ -1,0 +1,255 @@
+@startuml
+' DocWeaver - Class Diagram (derived strictly from your CRC cards & class list)
+' Classes: Workspace, User, Document, ProcessingJob, ExtractionModel, Record,
+' Field, LineItem, VendorTemplate, AuditLog, AuditEvent, ExportJob, Integration
+
+skinparam backgroundColor #FFFFFF
+skinparam class {
+  BackgroundColor White
+  BorderColor #555555
+}
+skinparam arrowColor #555555
+skinparam roundcorner 12
+skinparam shadowing false
+title DocWeaver — Core Domain Class Model
+
+'-------------------------
+' Lightweight enums (for readability; optional in code)
+'-------------------------
+'-------------------------
+' Lightweight enums (fixed syntax)
+'-------------------------
+enum DocumentType {
+  invoice
+  receipt
+  purchaseOrder
+  contract
+}
+
+enum RecordState {
+  Processing
+  NeedsReview
+  ReadyForExport
+  Exported
+  ExportFailed
+}
+
+enum JobStatus {
+  Queued
+  Running
+  Succeeded
+  Failed
+}
+
+
+'-------------------------
+' Core Classes
+'-------------------------
+class Workspace {
+  +id: UUID
+  +name: String
+  +createdAt: DateTime
+  --
+  +upload(files): void
+  +search(query): List<Document>
+  +configureVendorTemplate(tpl: VendorTemplate): void
+}
+
+class User {
+  +id: UUID
+  +email: String
+  +role: String
+  --
+  +review(rec: Record): void
+  +approve(rec: Record): void
+  +export(recs: List<Record>): void
+}
+
+class Document {
+  +id: UUID
+  +type: DocumentType
+  +status: String
+  +uriOriginal: String
+  +uploadedAt: DateTime
+  --
+  +validate(): boolean
+  +store(): void
+  +classify(): DocumentType
+}
+
+class ProcessingJob {
+  +id: UUID
+  +status: JobStatus
+  +createdAt: DateTime
+  +startedAt: DateTime
+  +finishedAt: DateTime
+  --
+  +runClassification(): void
+  +runExtraction(): void
+}
+
+class ExtractionModel {
+  +id: UUID
+  +name: String
+  +version: String
+  --
+  +classify(doc: Document): DocumentType
+  +extract(doc: Document): Record
+  +learnFromCorrections(tpl: VendorTemplate): void
+}
+
+class Record {
+  +id: UUID
+  +state: RecordState
+  +docDate: DateTime
+  +vendorName: String
+  +totalAmount: Money
+  --
+  +approve(): void
+  +lock(): void
+}
+
+class Field {
+  +key: String
+  +value: String
+  +confidence: Float
+  +provenance: String  ' e.g., page/box coordinates or model feature
+  --
+  +validate(): boolean
+  +correct(newValue: String): void
+}
+
+class LineItem {
+  +description: String
+  +qty: Decimal
+  +unitPrice: Money
+  +amount: Money
+  --
+  +deriveAmount(): Money
+}
+
+class VendorTemplate {
+  +id: UUID
+  +vendorCanonicalName: String
+  +hints: Map<String,String>  ' key mapping, regexes, layout cues
+  --
+  +applyTo(doc: Document): void
+}
+
+class AuditLog {
+  +id: UUID
+  +createdAt: DateTime
+  --
+  +exportCSV(): Blob
+  +exportPDF(): Blob
+}
+
+class AuditEvent {
+  +id: UUID
+  +eventType: String  ' upload, extract, edit, approve, export
+  +actorId: UUID
+  +timestamp: DateTime
+  +diff: String       ' field-level changes
+}
+
+class ExportJob {
+  +id: UUID
+  +status: JobStatus
+  +startedAt: DateTime
+  +finishedAt: DateTime
+  +outputUri: String  ' CSV/XLSX or artifact
+  --
+  +export(recs: List<Record>): void
+}
+
+class Integration {
+  +id: UUID
+  +provider: String  ' e.g., QuickBooks
+  +connectionHealth: String
+  --
+  +mapRecord(rec: Record): Payload
+  +post(payload: Payload): ExternalId
+}
+
+'-------------------------
+' Relationships (from CRC responsibilities & collaborators)
+'-------------------------
+
+' Workspace owns its content (strong lifecycle control)
+Workspace *-- "1..*" User
+Workspace *-- "0..*" Document
+Workspace *-- "0..*" Record
+Workspace *-- "0..*" Integration
+Workspace o-- "0..*" VendorTemplate
+Workspace o-- "0..*" AuditLog
+
+' User interacts with Records and generates AuditEvents
+User "1" -- "0..*" Record : reviews/approves >
+User "1" -- "0..*" AuditEvent : acts on >
+
+' Document lifecycle: created in Workspace, processed by Jobs/Models, linked to a Record
+Document "1" o-- "0..1" Record : source-of
+Document "1" -- "0..*" ProcessingJob : queued-for >
+Document "1" -- "0..*" AuditEvent
+
+' ProcessingJob uses ExtractionModel over a Document
+ProcessingJob "1" --> "1" Document
+ProcessingJob "1" --> "1" ExtractionModel
+
+' Extraction output: Record composed of Fields and LineItems
+Record *-- "0..*" Field
+Record *-- "0..*" LineItem
+Record "1" -- "1" Document
+Record "1" -- "0..*" AuditEvent
+Record "1" -- "0..*" ExportJob
+Record "1" --> "0..1" Integration : exported-via >
+
+' Field provenance (optional weak links)
+Field ..> Document : anchors-from
+Field ..> ExtractionModel : extracted-by
+
+' VendorTemplate guides extraction/normalization
+VendorTemplate ..> ExtractionModel : improves
+VendorTemplate ..> Document : layout-hints
+VendorTemplate ..> Record : prefill/defaults
+VendorTemplate ..> LineItem : column rules
+
+' Audit logging
+AuditLog *-- "1..*" AuditEvent
+AuditLog ..> Record
+AuditLog ..> Document
+AuditLog ..> User
+
+' Export pipeline
+ExportJob "1" --> "1..*" Record
+ExportJob "1" --> "0..1" Integration
+
+' Integration posts and returns external IDs stored on Record (not shown as attribute detail)
+Integration ..> Record : maps/posts
+
+'-------------------------
+' Notes (traceability to CRC)
+'-------------------------
+note right of Workspace
+- Manage members & roles
+- Contain docs/records/integrations
+- Accept uploads & enqueue processing
+- Provide search
+- Configure vendor templates
+- Audit & retention policies
+end note
+
+note right of ExtractionModel
+- Classify & extract
+- Produce fields/line items with confidence
+- Learn from corrections/templates
+- Versioned configuration
+end note
+
+note bottom of Record
+- Holds structure from document
+- Validations & approval
+- Links to vendor hints, audit, export results
+end note
+
+@enduml

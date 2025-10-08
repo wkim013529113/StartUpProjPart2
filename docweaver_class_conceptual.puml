@@ -1,0 +1,113 @@
+@startuml
+' DocWeaver — Conceptual (Analysis) Class Diagram
+' Goal: show structure, boundaries, and relationships (no attributes/methods)
+
+skinparam backgroundColor #FFFFFF
+skinparam package {
+  BackgroundColor #FAFAFA
+  BorderColor #777777
+}
+skinparam class {
+  BackgroundColor White
+  BorderColor #555555
+}
+skinparam arrowColor #555555
+skinparam shadowing false
+skinparam roundcorner 12
+hide attributes
+hide methods
+title DocWeaver — Conceptual Class Model (Packages + Multiplicities)
+
+package "Core" as CORE {
+  class Workspace
+  class User
+  class Document
+  class Record
+  class Field
+  class LineItem
+  class VendorTemplate
+}
+
+package "Processing" as PROC {
+  class ProcessingJob
+  class ExtractionModel
+}
+
+package "Audit" as AUD {
+  class AuditLog
+  class AuditEvent
+}
+
+package "Integration" as INTG {
+  class ExportJob
+  class Integration
+}
+
+'-------------------------
+' Core ownership/containment
+'-------------------------
+Workspace *-- "1..*" User
+Workspace *-- "0..*" Document
+Workspace *-- "0..*" Record
+Workspace o-- "0..*" VendorTemplate
+Workspace o-- "0..*" AuditLog
+Workspace *-- "0..*" Integration
+
+'-------------------------
+' Document lifecycle
+'-------------------------
+Document "1" o-- "0..1" Record : source-of
+Document "1" -- "0..*" ProcessingJob : queued-for >
+Document "1" -- "0..*" AuditEvent
+
+'-------------------------
+' Extraction pipeline
+'-------------------------
+ProcessingJob "1" --> "1" Document
+ProcessingJob "1" --> "1" ExtractionModel
+Record *-- "0..*" Field
+Record *-- "0..*" LineItem
+Record "1" -- "1" Document
+
+'-------------------------
+' User interactions
+'-------------------------
+User "1" -- "0..*" Record : reviews/approves >
+User "1" -- "0..*" AuditEvent : acts-on >
+
+'-------------------------
+' Vendor normalization
+'-------------------------
+VendorTemplate ..> Document : layout hints
+VendorTemplate ..> Record : prefill/defaults
+VendorTemplate ..> LineItem : column rules
+VendorTemplate ..> ExtractionModel : improves
+
+'-------------------------
+' Audit trail
+'-------------------------
+AuditLog *-- "1..*" AuditEvent
+AuditLog ..> Record
+AuditLog ..> Document
+AuditLog ..> User
+
+'-------------------------
+' Export paths
+'-------------------------
+Record "1" -- "0..*" ExportJob
+ExportJob "1" --> "1..*" Record
+ExportJob "1" --> "0..1" Integration
+Record "1" --> "0..1" Integration : exported-via >
+
+'-------------------------
+' Legend / Intent
+'-------------------------
+legend right
+  Conceptual diagram:
+  • Groups classes by concern (packages)
+  • Highlights ownership (composition *--) vs. association (-->)
+  • Shows multiplicities to explain cardinality and scaling
+  • Omits attributes/operations to reduce noise
+endlegend
+
+@enduml
