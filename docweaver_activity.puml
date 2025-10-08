@@ -1,0 +1,87 @@
+@startuml
+' DocWeaver Activity Diagram (End-to-End)
+' Partitions model who performs each action (Operator, System, Reviewer, Integration)
+
+skinparam backgroundColor #FFFFFF
+skinparam activity {
+  BackgroundColor<<user>> #E8F5E9
+  BackgroundColor<<system>> #E3F2FD
+  BackgroundColor<<reviewer>> #FFF8E1
+  BackgroundColor<<integration>> #F3E5F5
+  BorderColor #555555
+}
+skinparam shadowing false
+skinparam arrowColor #555555
+skinparam round corner 5
+
+title DocWeaver — Upload → Extract → Review → Approve → Export (Activity)
+
+start
+
+partition "Operator" {
+  :Select one or more PDFs/images; <<user>>;
+  :Click **Upload**; <<user>>;
+}
+
+partition "System" {
+  :Validate file type & size; <<system>>;
+  if ("Valid?") then (yes)
+    :Store originals (secure bucket); <<system>>;
+    :Create ProcessingJob & set status = \"Processing\"; <<system>>;
+  else (no)
+    :Show validation error; <<system>>;
+    stop
+  endif
+}
+
+partition "System" {
+  :Auto-classify (invoice/receipt/PO/contract); <<system>>;
+  :Run extraction model(s) → draft Record (fields + line items + confidence); <<system>>;
+  :Anchor fields to source regions; <<system>>;
+  if ("Low-confidence fields?") then (yes)
+    :Mark fields for review; <<system>>;
+  else (no)
+    :Mark record \"Auto-Approved Candidate\"; <<system>>;
+  endif
+}
+
+partition "Reviewer" {
+  :Open document in split view (source ↔ extracted fields); <<reviewer>>;
+  repeat
+    :Review highlighted fields; <<reviewer>>;
+    if ("Need correction?") then (yes)
+      :Edit value / map key / add missing lines; <<reviewer>>;
+      :System recomputes totals/validations; <<system>>;
+    else (no)
+      ' no-op
+    endif
+  repeat while ("More flagged fields?")
+  :Approve record; <<reviewer>>;
+}
+
+partition "System" {
+  :Lock record; <<system>>;
+  :Set status = \"Ready for Export\"; <<system>>;
+  if ("Export target?") then (Spreadsheet)
+    :Generate CSV/XLSX from selected records; <<system>>;
+    :Provide secure download link; <<system>>;
+  else (Accounting/ERP)
+    partition "Integration" {
+      :Map internal fields → target schema (e.g., QuickBooks); <<integration>>;
+      if ("Post succeeded?") then (yes)
+        :Store external ID; <<integration>>;
+        :Mark record = \"Exported\"; <<integration>>;
+      else (no)
+        :Log error & set status = \"Export Failed\"; <<integration>>;
+      endif
+    }
+  endif
+}
+
+partition "System" {
+  :Append AuditEvent(s): upload, extract, edits, approve, export; <<system>>;
+  :Update search index (vendor, dates, totals, status); <<system>>;
+}
+
+stop
+@enduml
