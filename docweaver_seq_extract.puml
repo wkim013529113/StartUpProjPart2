@@ -1,0 +1,42 @@
+@startuml
+title DocWeaver — Sequence (Extract Key Fields)
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam sequence {
+  ArrowColor #555
+  ParticipantBorderColor #444
+  ParticipantBackgroundColor #FFF
+  LifeLineBackgroundColor #FAFAFA
+}
+autonumber
+
+participant "Queue" as QUEUE
+participant "Extraction Service" as EXTRACT
+participant "Object Storage" as STORE
+participant "Model (Classifier+OCR)" as MODEL
+participant "DB" as DB
+participant "Audit Service" as AUDIT
+participant "Search Index" as SEARCH
+
+QUEUE -> EXTRACT: deliver ProcessingJob
+EXTRACT -> STORE: getObject(originals)
+EXTRACT -> MODEL: classify(document)
+MODEL --> EXTRACT: documentType
+EXTRACT -> MODEL: extract(fields, line items, confidence)
+MODEL --> EXTRACT: draft record + confidences
+
+EXTRACT -> DB: upsert Record(draft)
+alt Any low-confidence?
+  EXTRACT -> DB: set state=NeedsReview
+else No low-confidence
+  EXTRACT -> DB: set state=Auto-Approved Candidate
+end
+
+par Audit + Search (extracted)
+  EXTRACT -> AUDIT: log(extracted, modelVersion, metrics)
+  EXTRACT -> SEARCH: index(vendor, dates, totals, status)
+end
+
+EXTRACT --> QUEUE: ack
+@enduml

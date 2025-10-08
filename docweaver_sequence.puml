@@ -1,0 +1,122 @@
+@startuml
+title DocWeaver — End-to-End Sequence (Upload → Extract → Review → Approve → Export)
+
+' Styling (optional but tidy)
+skinparam backgroundColor #FFFFFF
+skinparam sequence {
+  ArrowColor #555555
+  LifeLineBorderColor #666666
+  LifeLineBackgroundColor #FAFAFA
+  ParticipantBorderColor #444444
+  ParticipantBackgroundColor #FFFFFF
+  BoxBorderColor #777777
+  BoxBackgroundColor #F9F9F9
+}
+autonumber
+
+actor Operator
+actor Reviewer
+
+participant "Web App (UI)" as UI
+participant "API Gateway" as API
+participant "Storage (S3/GCS)" as STORE
+participant "Queue" as QUEUE
+participant "Extraction Service" as EXTRACT
+participant "Model (Classifier+OCR)" as MODEL
+participant "DB (Records)" as DB
+participant "Audit Service" as AUDIT
+participant "Search Index" as SEARCH
+participant "Integration (e.g., QuickBooks)" as INTG
+
+== Upload ==
+Operator -> UI: Select files & click Upload
+UI -> API: POST /documents (metadata, files)
+API -> STORE: putObject(originals)
+STORE --> API: URI(s)
+API -> DB: create Document + status=Processing
+API -> QUEUE: enqueue ProcessingJob
+par Audit + Search update (upload)
+  API -> AUDIT: log(uploaded)
+  API -> SEARCH: index basic metadata
+end
+API --> UI: 202 Accepted {documentId, status=Processing}
+
+== Classify + Extract ==
+QUEUE -> EXTRACT: deliver ProcessingJob
+EXTRACT -> STORE: getObject(originals)
+EXTRACT -> MODEL: classify(document)
+MODEL --> EXTRACT: documentType
+EXTRACT -> MODEL: extract(fields, line items, confidence)
+MODEL --> EXTRACT: draft record + confidences
+EXTRACT -> DB: upsert Record (state depends on confidence)
+alt Any low-confidence?
+  EXTRACT -> DB: set state=NeedsReview
+else No low-confidence
+  EXTRACT -> DB: set state=Auto-Approved Candidate
+end
+par Audit + Search update (extracted)
+  EXTRACT -> AUDIT: log(extracted, modelVersion, metrics)
+  EXTRACT -> SEARCH: index fields (vendor, dates, totals, status)
+end
+EXTRACT --> QUEUE: ack
+
+== Review & Approve ==
+Reviewer -> UI: Open document for review
+UI -> API: GET /records/{id}
+API -> DB: fetch Record + field anchor regions
+DB --> API: Record + anchors
+API --> UI: render split view (source ↔ fields)
+
+loop For each flagged field
+  Reviewer -> UI: Edit/correct value or add line item
+  UI -> API: PATCH /records/{id} (field changes)
+  API -> DB: persist changes
+  API -> AUDIT: log(edit, field diffs)
+  API -> MODEL: (optional) feedback hook
+end
+
+Reviewer -> UI: Click Approve
+UI -> API: POST /records/{id}:approve
+API -> DB: lock record; set state=ReadyForExport
+par Audit + Search update (approved)
+  API -> AUDIT: log(approved)
+  API -> SEARCH: refresh status
+end
+API --> UI: 200 OK {state=ReadyForExport}
+
+== Export ==
+Operator -> UI: Choose export target (Spreadsheet or ERP)
+UI -> API: POST /exports (records[], target)
+alt Target = Spreadsheet
+  API -> DB: create ExportJob(status=Running)
+  API -> DB: read Records
+  API -> UI: (stream) CSV/XLSX artifact
+  API -> DB: update ExportJob(status=Succeeded, outputUri)
+  API -> DB: mark Records Exported
+  par Audit
+    API -> AUDIT: log(export_generated)
+  end
+else Target = Accounting/ERP
+  API -> DB: create ExportJob(status=Running)
+  API -> INTG: map+post(payload from Records)
+  alt Post succeeded
+    INTG --> API: externalId(s)
+    API -> DB: mark Records Exported (store externalId)
+    API -> DB: update ExportJob(status=Succeeded)
+    par Audit + Search update
+      API -> AUDIT: log(exported, externalId)
+      API -> SEARCH: refresh status
+    end
+  else Post failed
+    INTG --> API: error(reason)
+    API -> DB: update ExportJob(status=Failed)
+    API -> DB: set Record state=ExportFailed
+    API -> AUDIT: log(export_failed, reason)
+  end
+end
+
+== Result ==
+API --> UI: Export result (link or external IDs)
+UI --> Operator: Show success/failure + audit link
+
+@enduml

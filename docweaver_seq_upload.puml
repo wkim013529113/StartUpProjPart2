@@ -1,0 +1,36 @@
+@startuml
+title DocWeaver — Sequence (Upload Document)
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam sequence {
+  ArrowColor #555
+  ParticipantBorderColor #444
+  ParticipantBackgroundColor #FFF
+  LifeLineBackgroundColor #FAFAFA
+}
+autonumber
+
+actor Operator
+participant "Web App (UI)" as UI
+participant "API" as API
+participant "Object Storage" as STORE
+participant "DB" as DB
+participant "Queue" as QUEUE
+participant "Audit Service" as AUDIT
+participant "Search Index" as SEARCH
+
+Operator -> UI: Select files & Click Upload
+UI -> API: POST /documents {files, meta}
+API -> STORE: putObject(originals)
+STORE --> API: uri(s)
+API -> DB: create Document(status=Processing)
+API -> QUEUE: enqueue ProcessingJob
+
+par Audit + Search (upload)
+  API -> AUDIT: log(uploaded)
+  API -> SEARCH: index(metadata)
+end
+
+API --> UI: 202 Accepted {documentId, status=Processing}
+@enduml

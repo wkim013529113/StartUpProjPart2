@@ -1,0 +1,48 @@
+@startuml
+title DocWeaver — Sequence (Approve Export)
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam sequence {
+  ArrowColor #555
+  ParticipantBorderColor #444
+  ParticipantBackgroundColor #FFF
+  LifeLineBackgroundColor #FAFAFA
+}
+autonumber
+
+actor Reviewer
+participant "Web App (UI)" as UI
+participant "API" as API
+participant "DB" as DB
+participant "Audit Service" as AUDIT
+participant "Search Index" as SEARCH
+participant "Model Feedback" as FEEDBACK
+
+Reviewer -> UI: Open record for review
+UI -> API: GET /records/{id}
+API -> DB: fetch Record + anchors
+DB --> API: record + anchors
+API --> UI: render split view
+
+loop For each flagged field
+  Reviewer -> UI: Correct value / line item
+  UI -> API: PATCH /records/{id} (diff)
+  API -> DB: persist changes
+  API -> AUDIT: log(edit, field diffs)
+  opt Optional learning hook
+    API -> FEEDBACK: send corrections
+  end
+end
+
+Reviewer -> UI: Click Approve
+UI -> API: POST /records/{id}:approve
+API -> DB: lock; set state=ReadyForExport
+
+par Audit + Search (approved)
+  API -> AUDIT: log(approved)
+  API -> SEARCH: refresh(status)
+end
+
+API --> UI: 200 OK {state=ReadyForExport}
+@enduml
